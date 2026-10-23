@@ -1,0 +1,17 @@
+golang.org/x/net/publicsuffix compiles in Mozilla's Public Suffix List
+(https://publicsuffix.org/list/public_suffix_list.dat): its table.go embeds
+data/text, data/nodes and data/children, which its gen.go generates from the
+list. The package's code is under the BSD-3-Clause license of
+golang.org/x/net, in the LICENSE file in the directory above, but the list
+carries this notice:
+
+  This Source Code Form is subject to the terms of the Mozilla Public
+  License, v. 2.0. If a copy of the MPL was not distributed with this
+  file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+The text of the Mozilla Public License 2.0 is in the file MPL-2.0 next to
+this one. The list itself, as it was at the commit of
+https://github.com/publicsuffix/list that the package's table.go names, is
+/usr/local/share/randomcontainers/azcopy/mpl-sources/public_suffix_list.dat
+in this image, and /usr/local/share/randomcontainers/azcopy/source gives its
+URL at that commit.
