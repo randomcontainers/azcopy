@@ -1,0 +1,113 @@
+name: azcopy
+title: AzCopy
+summary: Copies files to and from Azure Blob Storage, Azure Files and Data Lake Storage, and from Amazon S3 and Google Cloud Storage into Blob Storage, with AzCopy.
+homepage: https://github.com/Azure/azure-storage-azcopy
+# AzCopy (MIT) and the Go modules linked into it: MIT (the Azure SDK for Go,
+# MSAL, testify), Apache-2.0 (the Google Cloud libraries, gRPC, OpenTelemetry,
+# minio-go, cobra), BSD-3-Clause (also the Go standard library and
+# golang.org/x), BSD-2-Clause (pkg/errors, pkg/xattr, zeebo/xxh3) and ISC (the
+# copy of go-spew in testify). MPL-2.0 is the license of Mozilla's Public
+# Suffix List: golang.org/x/net/publicsuffix, which minio-go uses, embeds
+# tables generated from it, so the list itself is copied into the image (see
+# public-suffix-list below). AzCopy's NOTICE.txt is copied with its license.
+license: MIT AND Apache-2.0 AND BSD-3-Clause AND BSD-2-Clause AND ISC AND MPL-2.0
+upstream:
+  source: github-release
+  repository: Azure/azure-storage-azcopy
+  # Pre-releases are tagged like v10.33.0-beta, but v10.30.0-preview.2 was
+  # published as a normal release, so the pattern takes only plain versions.
+  tag-pattern: '^v(\d+\.\d+\.\d+)$'
+  version-template: '{1}'
+  versioning: semver
+  version: 10.34.1
+  # A release often raises the Go version that go.mod requires. Three days
+  # leave time to raise the pinned Go toolchain before the release is built.
+  cooldown: 72h
+  # The release assets are prebuilt binaries, with no source tarball, so the
+  # build compiles the tag.
+  git:
+    url: https://github.com/Azure/azure-storage-azcopy.git
+    tag: v{version}
+    commit: 39083e963e007a879b5ce096f62083af4f209c0c
+  extra-artifacts:
+    # The Public Suffix List at the commit of publicsuffix/list that the
+    # tables in golang.org/x/net/publicsuffix were generated from, which its
+    # table.go names. It is the source the MPL-2.0 asks for. The build stops
+    # when the golang.org/x/net that azcopy links names another commit: set
+    # version to that commit and sha256 to the hash of the file at it.
+    public-suffix-list:
+      version: "d6c92f1bbb7433e5db7b8405c25d4035fb8ff376"
+      url: https://raw.githubusercontent.com/publicsuffix/list/{version}/public_suffix_list.dat
+      sha256: a5638281157e8c902b127a5376f9ea2d024bf2ee11524133a6a76cd1d14ee7be
+image:
+  entrypoint: [azcopy]
+  cmd: [--help]
+  # azcopy keeps logs and job plans in $HOME/.azcopy. The all-zero
+  # instrumentation key turns off the usage telemetry that AzCopy sends to
+  # Microsoft by default since 10.34.0; an empty value turns it back on.
+  env:
+    HOME: /cache
+    AZCOPY_DISABLE_SYSLOG: "true"
+    AZCOPY_TELEMETRY_CONNECTION_STRING: "InstrumentationKey=00000000-0000-0000-0000-000000000000"
+test:
+  - |
+    azcopy --version > version.txt
+    printf '%s\n' "azcopy version $VERSION" > version.want
+    cmp version.want version.txt || { echo "expected 'azcopy version $VERSION', got:" >&2; cat version.txt >&2; exit 1; }
+  - |
+    azcopy --help > help.txt
+    for command in bench copy env jobs list login logout make remove set-properties sync; do
+      grep -q "^  $command " help.txt || { cat help.txt >&2; echo "azcopy --help does not list $command" >&2; exit 1; }
+    done
+  - |
+    # The settings the image makes: HOME, syslog off, and /etc/mime.types,
+    # from which azcopy takes the content type of uploaded files.
+    test "$HOME" = /cache || { echo "HOME is $HOME, expected /cache" >&2; exit 1; }
+    azcopy env > env.txt
+    awk '/Name: AZCOPY_DISABLE_SYSLOG$/ { getline; print; exit }' env.txt > syslog.txt
+    printf '%s\n' 'Current Value: true' > syslog.want
+    cmp syslog.want syslog.txt || { cat env.txt >&2; exit 1; }
+    awk '$1 == "text/csv" { for (i = 2; i <= NF; i++) if ($i == "csv") found = 1 } END { exit !found }' /etc/mime.types \
+      || { echo "/etc/mime.types does not map .csv to text/csv" >&2; exit 1; }
+  - |
+    # jobs list sends a telemetry event when telemetry is on, and creating
+    # the event writes an installation ID to $HOME/.azcopy first. With the
+    # image's setting nothing is written.
+    azcopy jobs list > jobs.txt 2>&1 || { cat jobs.txt >&2; exit 1; }
+    grep -q '^Existing Jobs' jobs.txt || { cat jobs.txt >&2; exit 1; }
+    test -d /cache/.azcopy/plans || { echo "no /cache/.azcopy/plans" >&2; ls -la /cache >&2; exit 1; }
+    find /cache -name '*installation_id*' > telemetry.txt
+    if [ -s telemetry.txt ]; then
+      cat telemetry.txt >&2; echo "azcopy wrote an installation ID with telemetry off" >&2; exit 1
+    fi
+    # The same command with telemetry sent to a closed local port writes the
+    # file, so the check above looks in the right place. The event cannot
+    # leave the container.
+    AZCOPY_TELEMETRY_CONNECTION_STRING='InstrumentationKey=11111111-1111-1111-1111-111111111111;IngestionEndpoint=http://127.0.0.1:9' \
+      azcopy jobs list > control.txt 2>&1 || { cat control.txt >&2; exit 1; }
+    test -s /cache/.azcopy/installation_id \
+      || { echo "no installation ID with telemetry on" >&2; ls -la /cache/.azcopy >&2; exit 1; }
+  - |
+    # azcopy cannot copy between two local paths. It stops before any
+    # transfer, after opening its log in $HOME/.azcopy, and leaves nothing in
+    # the working directory.
+    printf 'hello\n' > a.txt
+    if azcopy copy a.txt b.txt > copy.txt 2>&1; then
+      cat copy.txt >&2; echo "a local to local copy succeeded" >&2; exit 1
+    fi
+    grep -Fq 'the inferred source/destination combination could not be identified' copy.txt \
+      || { cat copy.txt >&2; exit 1; }
+    cat /cache/.azcopy/*.log > log.txt || { ls -la /cache/.azcopy >&2; exit 1; }
+    grep -Eq "AzcopyVersion +$VERSION\$" log.txt || { cat log.txt >&2; exit 1; }
+    for f in b.txt .azcopy pids; do
+      if [ -e "$f" ]; then echo "azcopy created $f in the working directory" >&2; exit 1; fi
+    done
+examples:
+  - title: Upload a directory to a blob container with a SAS token
+    command: docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" ghcr.io/randomcontainers/azcopy copy site "https://<account>.blob.core.windows.net/<container>?<SAS>" --recursive
+  - title: Download a container into a directory of the same name
+    command: docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" ghcr.io/randomcontainers/azcopy copy "https://<account>.blob.core.windows.net/<container>?<SAS>" . --recursive
+  - title: Make site/ in a container match a local directory, deleting blobs that are not in it
+    command: docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" ghcr.io/randomcontainers/azcopy sync site "https://<account>.blob.core.windows.net/<container>/site?<SAS>" --delete-destination=true
+  - title: List the blobs in a container
+    command: docker run --rm ghcr.io/randomcontainers/azcopy list "https://<account>.blob.core.windows.net/<container>?<SAS>"
