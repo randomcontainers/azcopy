@@ -19,7 +19,7 @@ upstream:
   tag-pattern: '^v(\d+\.\d+\.\d+)$'
   version-template: '{1}'
   versioning: semver
-  version: 10.34.1
+  version: 10.34.2
   # A release often raises the Go version that go.mod requires. Three days
   # leave time to raise the pinned Go toolchain before the release is built.
   cooldown: 72h
@@ -28,7 +28,7 @@ upstream:
   git:
     url: https://github.com/Azure/azure-storage-azcopy.git
     tag: v{version}
-    commit: 39083e963e007a879b5ce096f62083af4f209c0c
+    commit: c3ca337678889b4c58b1e588eda4d15db0ddaf72
   extra-artifacts:
     # The Public Suffix List at the commit of publicsuffix/list that the
     # tables in golang.org/x/net/publicsuffix were generated from, which its
